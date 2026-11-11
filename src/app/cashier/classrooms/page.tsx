@@ -5,13 +5,18 @@ import {
   getCashierClassrooms,
   getCashierClassroomStudents,
   approveCashierStudentFee,
+  revertCashierStudentFee,
+  revertCashierAllFees,
   approveCashierClassroomAll,
+  approveCashierBulkFees,
+  searchCashierStudentsGlobally,
   CashierClassroom,
   CashierStudentFeeRow,
+  CashierGlobalStudentFeeRow,
 } from "@/lib/cashier-api";
 import { getDepartmentsList, AdvisorDepartmentOption } from "@/lib/advisor-api";
 import { ApiError } from "@/lib/api";
-import { Search, RefreshCw, Check, ArrowLeft, School, CheckCheck } from "lucide-react";
+import { Search, RefreshCw, Check, ArrowLeft, School, CheckCheck, User, RotateCcw } from "lucide-react";
 import { PageHeader, Badge, Button } from "@/components/ui/controls";
 import { TableSkeleton, EmptyState, ErrorState, Pagination, ButtonSpinner } from "@/components/ui/feedback";
 
@@ -25,6 +30,10 @@ export default function CashierClassroomsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Global student matches when searching in main directory
+  const [matchedStudents, setMatchedStudents] = useState<CashierGlobalStudentFeeRow[]>([]);
+  const [searchingStudents, setSearchingStudents] = useState(false);
+
   // Selected classroom drill-down state
   const [selectedClassroom, setSelectedClassroom] = useState<CashierClassroom | null>(null);
   const [students, setStudents] = useState<CashierStudentFeeRow[]>([]);
@@ -34,9 +43,15 @@ export default function CashierClassroomsPage() {
   const [studentsLoading, setStudentsLoading] = useState(false);
   const [studentsError, setStudentsError] = useState<string | null>(null);
 
+  // Multi-select state
+  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
+  const [bulkApproving, setBulkApproving] = useState(false);
+
   // Action states
   const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [revertingId, setRevertingId] = useState<string | null>(null);
   const [approvingAll, setApprovingAll] = useState(false);
+  const [revertingAll, setRevertingAll] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   // Load departments once
@@ -71,6 +86,28 @@ export default function CashierClassroomsPage() {
     }
   }, [loadClassrooms, search, selectedClassroom]);
 
+  // If search query is present, also search students directly across all classes
+  useEffect(() => {
+    if (selectedClassroom) return;
+    const query = search.trim();
+    if (!query) {
+      setMatchedStudents([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setSearchingStudents(true);
+      try {
+        const results = await searchCashierStudentsGlobally(query, deptFilter || undefined);
+        setMatchedStudents(results);
+      } catch {
+        setMatchedStudents([]);
+      } finally {
+        setSearchingStudents(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search, deptFilter, selectedClassroom]);
+
   // Load students of selected classroom
   const loadStudents = useCallback(async () => {
     if (!selectedClassroom) return;
@@ -85,6 +122,7 @@ export default function CashierClassroomsPage() {
       });
       setStudents(res.data);
       setStudentsMeta(res.meta);
+      setSelectedStudentIds([]);
     } catch (err) {
       setStudentsError(err instanceof ApiError ? err.message : "Failed to load students.");
     } finally {
@@ -106,13 +144,40 @@ export default function CashierClassroomsPage() {
       await approveCashierStudentFee(student.id);
       setNotice(`Fee approved for ${student.studentName} (${student.registerNumber}).`);
       setTimeout(() => setNotice(null), 5000);
-      await loadStudents();
+      if (selectedClassroom) {
+        await loadStudents();
+      }
+      // Also update matched students if any
+      setMatchedStudents((prev) =>
+        prev.map((s) => (s.id === student.id ? { ...s, verified: true, cashierApproved: true } : s))
+      );
       // Also update counts in the parent list in background
       loadClassrooms();
     } catch (err) {
       setStudentsError(err instanceof ApiError ? err.message : "Failed to approve fee.");
     } finally {
       setApprovingId(null);
+    }
+  };
+
+  const handleRevertStudent = async (studentId: string, studentName: string) => {
+    setRevertingId(studentId);
+    setStudentsError(null);
+    try {
+      await revertCashierStudentFee(studentId);
+      setNotice(`Fee approval reverted for ${studentName}.`);
+      setTimeout(() => setNotice(null), 5000);
+      if (selectedClassroom) {
+        await loadStudents();
+      }
+      setMatchedStudents((prev) =>
+        prev.map((s) => (s.id === studentId ? { ...s, verified: false, cashierApproved: false } : s))
+      );
+      loadClassrooms();
+    } catch (err) {
+      setStudentsError(err instanceof ApiError ? err.message : "Failed to revert fee.");
+    } finally {
+      setRevertingId(null);
     }
   };
 
@@ -130,6 +195,76 @@ export default function CashierClassroomsPage() {
       setStudentsError(err instanceof ApiError ? err.message : "Failed to approve all fees.");
     } finally {
       setApprovingAll(false);
+    }
+  };
+
+  const handleApproveSelected = async () => {
+    if (selectedStudentIds.length === 0) return;
+    setBulkApproving(true);
+    setStudentsError(null);
+    try {
+      const res = await approveCashierBulkFees(selectedStudentIds);
+      setNotice(`Successfully approved fees for ${res.approvedCount} selected student(s).`);
+      setTimeout(() => setNotice(null), 5000);
+      setSelectedStudentIds([]);
+      if (selectedClassroom) {
+        await loadStudents();
+      }
+      loadClassrooms();
+    } catch (err) {
+      setStudentsError(err instanceof ApiError ? err.message : "Failed to approve selected students.");
+    } finally {
+      setBulkApproving(false);
+    }
+  };
+
+  const handleRevertAllClasses = async () => {
+    const ok = window.confirm(
+      "Are you sure you want to UNDO ALL fee clearances across ALL classrooms? Every student will be reset to Pending fee verification."
+    );
+    if (!ok) return;
+
+    setRevertingAll(true);
+    setError(null);
+    try {
+      const res = await revertCashierAllFees();
+      setNotice(`Successfully reverted fee clearance for all ${res.revertedCount} students across all classes.`);
+      setTimeout(() => setNotice(null), 6000);
+      if (selectedClassroom) {
+        await loadStudents();
+      }
+      setMatchedStudents((prev) =>
+        prev.map((s) => ({ ...s, verified: false, cashierApproved: false }))
+      );
+      await loadClassrooms();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to revert all fee clearances.");
+    } finally {
+      setRevertingAll(false);
+    }
+  };
+
+  const toggleSelectStudent = (id: string) => {
+    setSelectedStudentIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const pendingStudentsInView = students.filter((s) => !s.verified);
+  const allPendingSelected =
+    pendingStudentsInView.length > 0 &&
+    pendingStudentsInView.every((s) => selectedStudentIds.includes(s.id));
+
+  const toggleSelectAllPending = () => {
+    if (allPendingSelected) {
+      // Unselect all
+      setSelectedStudentIds((prev) =>
+        prev.filter((id) => !pendingStudentsInView.some((s) => s.id === id))
+      );
+    } else {
+      // Select all pending in view
+      const pendingIds = pendingStudentsInView.map((s) => s.id);
+      setSelectedStudentIds((prev) => Array.from(new Set([...prev, ...pendingIds])));
     }
   };
 
@@ -163,13 +298,24 @@ export default function CashierClassroomsPage() {
                     setSelectedClassroom(null);
                     setStudentSearch("");
                     setStudentStatusFilter("ALL");
+                    setSelectedStudentIds([]);
                   }}
                 >
                   <ArrowLeft style={{ width: 14, height: 14 }} />
                   Back to Classes
                 </Button>
+                {selectedStudentIds.length > 0 && (
+                  <Button
+                    onClick={handleApproveSelected}
+                    disabled={bulkApproving}
+                  >
+                    {bulkApproving ? <ButtonSpinner /> : <Check style={{ width: 14, height: 14 }} />}
+                    {bulkApproving ? "Approving…" : `Approve Selected (${selectedStudentIds.length})`}
+                  </Button>
+                )}
                 {pendingCount > 0 && (
                   <Button
+                    variant={selectedStudentIds.length > 0 ? "secondary" : "primary"}
                     onClick={handleApproveAllPending}
                     disabled={approvingAll}
                   >
@@ -179,10 +325,22 @@ export default function CashierClassroomsPage() {
                 )}
               </>
             ) : (
-              <Button variant="secondary" onClick={loadClassrooms}>
-                <RefreshCw style={{ width: 14, height: 14 }} />
-                Refresh
-              </Button>
+              <>
+                <Button
+                  variant="secondary"
+                  onClick={handleRevertAllClasses}
+                  disabled={revertingAll}
+                  style={{ color: "var(--nd-danger, #ef4444)" }}
+                  title="Reset all students across all classes to pending"
+                >
+                  {revertingAll ? <ButtonSpinner /> : <RotateCcw style={{ width: 14, height: 14 }} />}
+                  {revertingAll ? "Undoing All…" : "Undo All Classes"}
+                </Button>
+                <Button variant="secondary" onClick={loadClassrooms}>
+                  <RefreshCw style={{ width: 14, height: 14 }} />
+                  Refresh
+                </Button>
+              </>
             )}
           </div>
         }
@@ -235,6 +393,153 @@ export default function CashierClassroomsPage() {
           {error && !loading && (
             <div className="nd-card" style={{ marginBottom: 16 }}>
               <ErrorState message={error} onRetry={loadClassrooms} />
+            </div>
+          )}
+
+          {/* ─── DIRECT STUDENT SEARCH RESULTS ─── */}
+          {search.trim() && (
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <h3 style={{ fontSize: 15, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                  <User style={{ width: 16, height: 16, color: "var(--nd-primary, #2563eb)" }} />
+                  Matched Students ({matchedStudents.length})
+                </h3>
+                {selectedStudentIds.length > 0 && (
+                  <Button
+                    size="sm"
+                    onClick={handleApproveSelected}
+                    disabled={bulkApproving}
+                  >
+                    {bulkApproving ? <ButtonSpinner /> : <Check style={{ width: 14, height: 14 }} />}
+                    {bulkApproving ? "Approving…" : `Approve Selected (${selectedStudentIds.length})`}
+                  </Button>
+                )}
+              </div>
+
+              {searchingStudents ? (
+                <TableSkeleton rows={2} cols={5} />
+              ) : matchedStudents.length > 0 ? (
+                <div className="nd-table-card">
+                  <div className="nd-table-scroll">
+                    <table className="nd-table">
+                      <thead>
+                        <tr>
+                          <th style={{ width: 40, textAlign: "center" }}>
+                            <input
+                              type="checkbox"
+                              className="nd-checkbox"
+                              checked={
+                                matchedStudents.some((s) => !s.verified) &&
+                                matchedStudents.filter((s) => !s.verified).every((s) => selectedStudentIds.includes(s.id))
+                              }
+                              disabled={!matchedStudents.some((s) => !s.verified)}
+                              onChange={() => {
+                                const pendingMatches = matchedStudents.filter((s) => !s.verified);
+                                const allSelected = pendingMatches.every((s) => selectedStudentIds.includes(s.id));
+                                if (allSelected) {
+                                  setSelectedStudentIds((prev) =>
+                                    prev.filter((id) => !pendingMatches.some((s) => s.id === id))
+                                  );
+                                } else {
+                                  setSelectedStudentIds((prev) =>
+                                    Array.from(new Set([...prev, ...pendingMatches.map((s) => s.id)]))
+                                  );
+                                }
+                              }}
+                              title="Select all pending matching students"
+                              aria-label="Select all pending matching students"
+                            />
+                          </th>
+                          <th>Register No</th>
+                          <th>Roll No</th>
+                          <th>Student Name</th>
+                          <th>Department & Class</th>
+                          <th>Fee Status</th>
+                          <th style={{ textAlign: "right" }}>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {matchedStudents.map((st) => {
+                          const isSelected = selectedStudentIds.includes(st.id);
+                          return (
+                            <tr key={st.id} style={isSelected ? { backgroundColor: "var(--nd-primary-subtle, rgba(37, 99, 235, 0.05))" } : undefined}>
+                              <td style={{ textAlign: "center" }}>
+                                {!st.verified ? (
+                                  <input
+                                    type="checkbox"
+                                    className="nd-checkbox"
+                                    checked={isSelected}
+                                    onChange={() => toggleSelectStudent(st.id)}
+                                    aria-label={`Select ${st.studentName}`}
+                                  />
+                                ) : (
+                                  <span style={{ color: "var(--nd-text-muted, #94a3b8)" }}>—</span>
+                                )}
+                              </td>
+                              <td>
+                                <span className="nd-code" style={{ fontWeight: 600 }}>{st.registerNumber}</span>
+                              </td>
+                              <td>{st.rollNumber || "—"}</td>
+                              <td>
+                                <div className="nd-cell-primary">{st.studentName}</div>
+                                <div className="nd-cell-secondary" style={{ fontSize: 12 }}>{st.email}</div>
+                              </td>
+                              <td>
+                                <Badge tone="info">{st.department?.code}</Badge>
+                                <span style={{ marginLeft: 8, fontWeight: 500 }}>{st.classroom?.name}</span>
+                                <span className="nd-cell-secondary" style={{ marginLeft: 4, fontSize: 12 }}>
+                                  (Sem {st.classroom?.semester})
+                                </span>
+                              </td>
+                              <td>
+                                {st.verified ? (
+                                  <Badge tone="success">Verified</Badge>
+                                ) : (
+                                  <Badge tone="warning">Pending</Badge>
+                                )}
+                              </td>
+                              <td style={{ textAlign: "right" }}>
+                                {st.verified ? (
+                                  <div style={{ display: "inline-flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                                    <span className="nd-cell-secondary" style={{ fontSize: 13, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                      <Check style={{ width: 14, height: 14, color: "var(--nd-success, #16a34a)" }} />
+                                      Approved
+                                    </span>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => handleRevertStudent(st.id, st.studentName)}
+                                      disabled={revertingId === st.id}
+                                      style={{ fontSize: 12, padding: "2px 6px", height: "auto", color: "var(--nd-warning, #d97706)" }}
+                                      title="Undo fee approval"
+                                    >
+                                      {revertingId === st.id ? <ButtonSpinner /> : <RotateCcw style={{ width: 12, height: 12 }} />}
+                                      Undo
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleApproveStudent(st)}
+                                    disabled={approvingId === st.id}
+                                  >
+                                    {approvingId === st.id && <ButtonSpinner />}
+                                    Approve Fee
+                                  </Button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="nd-card" style={{ padding: "12px 16px", marginBottom: 16, color: "var(--nd-text-secondary, #64748b)", fontSize: 13 }}>
+                  No individual student found with register / roll number matching &quot;{search}&quot;.
+                </div>
+              )}
             </div>
           )}
 
@@ -376,40 +681,80 @@ export default function CashierClassroomsPage() {
                 <table className="nd-table">
                   <thead>
                     <tr>
+                      <th style={{ width: 40, textAlign: "center" }}>
+                        <input
+                          type="checkbox"
+                          className="nd-checkbox"
+                          checked={allPendingSelected}
+                          disabled={pendingStudentsInView.length === 0}
+                          onChange={toggleSelectAllPending}
+                          title="Select all pending students"
+                          aria-label="Select all pending students"
+                        />
+                      </th>
                       <th>Register No</th>
                       <th>Student</th>
                       <th style={{ textAlign: "right" }}>Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {students.map((st) => (
-                      <tr key={st.id}>
-                        <td>
-                          <span className="nd-code">{st.registerNumber}</span>
-                        </td>
-                        <td>
-                          <div className="nd-cell-primary">{st.studentName}</div>
-                          <div className="nd-cell-secondary">{st.email}</div>
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          {st.verified ? (
-                            <span className="nd-cell-secondary" style={{ fontSize: 13, display: "inline-flex", alignItems: "center", gap: 4 }}>
-                              <Check style={{ width: 14, height: 14, color: "var(--nd-success, #16a34a)" }} />
-                              Done
-                            </span>
-                          ) : (
-                            <Button
-                              size="sm"
-                              onClick={() => handleApproveStudent(st)}
-                              disabled={approvingId === st.id}
-                            >
-                              {approvingId === st.id && <ButtonSpinner />}
-                              Approve Fee
-                            </Button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                    {students.map((st) => {
+                      const isSelected = selectedStudentIds.includes(st.id);
+                      return (
+                        <tr key={st.id} style={isSelected ? { backgroundColor: "var(--nd-primary-subtle, rgba(37, 99, 235, 0.05))" } : undefined}>
+                          <td style={{ textAlign: "center" }}>
+                            {!st.verified ? (
+                              <input
+                                type="checkbox"
+                                className="nd-checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleSelectStudent(st.id)}
+                                aria-label={`Select ${st.studentName}`}
+                              />
+                            ) : (
+                              <span style={{ color: "var(--nd-text-muted, #94a3b8)" }}>—</span>
+                            )}
+                          </td>
+                          <td>
+                            <span className="nd-code">{st.registerNumber}</span>
+                          </td>
+                          <td>
+                            <div className="nd-cell-primary">{st.studentName}</div>
+                            <div className="nd-cell-secondary">{st.email}</div>
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            {st.verified ? (
+                              <div style={{ display: "inline-flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                                <span className="nd-cell-secondary" style={{ fontSize: 13, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                  <Check style={{ width: 14, height: 14, color: "var(--nd-success, #16a34a)" }} />
+                                  Done
+                                </span>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleRevertStudent(st.id, st.studentName)}
+                                  disabled={revertingId === st.id}
+                                  style={{ fontSize: 12, padding: "2px 6px", height: "auto", color: "var(--nd-warning, #d97706)" }}
+                                  title="Undo fee approval"
+                                >
+                                  {revertingId === st.id ? <ButtonSpinner /> : <RotateCcw style={{ width: 12, height: 12 }} />}
+                                  Undo
+                                </Button>
+                              </div>
+                            ) : (
+                              <Button
+                                size="sm"
+                                onClick={() => handleApproveStudent(st)}
+                                disabled={approvingId === st.id}
+                              >
+                                {approvingId === st.id && <ButtonSpinner />}
+                                Approve Fee
+                              </Button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

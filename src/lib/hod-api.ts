@@ -464,3 +464,21 @@ export async function updateHodStudent(
   return res.data;
 }
 
+export interface ResetNextSemResponse {
+  departmentId: string;
+  resetApprovalsCount: number;
+  resetFeesCount: number;
+  resetStudentsCount: number;
+  totalStudents: number;
+}
+
+export async function resetHodApprovalsForNextSem(): Promise<ResetNextSemResponse> {
+  const res = await apiClient<{ success: boolean; data: ResetNextSemResponse }>(
+    "/hod/approvals/reset-all",
+    {
+      method: "POST",
+    }
+  );
+  return res.data;
+}
+

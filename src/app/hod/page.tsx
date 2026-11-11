@@ -2,7 +2,12 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { getHodDashboard, getHodApprovals, HodDashboardData } from "@/lib/hod-api";
+import {
+  getHodDashboard,
+  getHodApprovals,
+  resetHodApprovalsForNextSem,
+  HodDashboardData,
+} from "@/lib/hod-api";
 import { ApiError } from "@/lib/api";
 import {
   GraduationCap,
@@ -15,6 +20,8 @@ import {
   FileText,
   Download,
   Loader2,
+  RotateCcw,
+  Check,
 } from "lucide-react";
 import { PageHeader, StatCard, Card, Button, Badge } from "@/components/ui/controls";
 import { PageLoader, ErrorState, ActivityList } from "@/components/ui/feedback";
@@ -41,6 +48,8 @@ export default function HodDashboardPage() {
   const [exportingClearance, setExportingClearance] = useState(false);
   const [exportingDefaultersPdf, setExportingDefaultersPdf] = useState(false);
   const [exportingClearancePdf, setExportingClearancePdf] = useState(false);
+  const [resettingNextSem, setResettingNextSem] = useState(false);
+  const [resetNotice, setResetNotice] = useState<string | null>(null);
 
   const fetchDashboard = useCallback(async () => {
     setError(null);
@@ -61,6 +70,28 @@ export default function HodDashboardPage() {
   useEffect(() => {
     fetchDashboard();
   }, [fetchDashboard]);
+
+  const handleResetForNextSem = async () => {
+    const ok = window.confirm(
+      "⚠️ RESET ALL APPROVALS FOR NEXT SEMESTER?\n\nThis will reset:\n1. All Subject Staff approvals -> PENDING\n2. All Advisor approvals -> PENDING\n3. All HOD approvals -> PENDING\n4. All Fee clearances & final student No-Due verifications in your department.\n\nAre you sure you want to proceed?"
+    );
+    if (!ok) return;
+
+    setResettingNextSem(true);
+    setError(null);
+    try {
+      const res = await resetHodApprovalsForNextSem();
+      setResetNotice(
+        `Successfully reset ${res.resetApprovalsCount} subject/staff approvals, ${res.resetFeesCount} fee verifications, and ${res.resetStudentsCount} students for the next semester.`
+      );
+      setTimeout(() => setResetNotice(null), 8000);
+      await fetchDashboard();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to reset approvals for next semester.");
+    } finally {
+      setResettingNextSem(false);
+    }
+  };
 
   if (loading) return <PageLoader label="Loading department overview…" />;
 
@@ -90,7 +121,21 @@ export default function HodDashboardPage() {
         title={department.name}
         description={`${department.code} · Department-scoped overview of classrooms, advisors and students.`}
         actions={
-          <>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button
+              variant="secondary"
+              onClick={handleResetForNextSem}
+              disabled={resettingNextSem}
+              style={{ color: "var(--nd-danger, #ef4444)" }}
+              title="Reset all student clearances for the next semester"
+            >
+              {resettingNextSem ? (
+                <Loader2 className="nd-spinner" style={{ width: 14, height: 14 }} />
+              ) : (
+                <RotateCcw style={{ width: 14, height: 14 }} />
+              )}
+              {resettingNextSem ? "Resetting…" : "Reset All Approvals (Next Sem)"}
+            </Button>
             <Button variant="secondary" onClick={fetchDashboard}>
               <RefreshCw style={{ width: 14, height: 14 }} />
               Refresh
@@ -98,7 +143,7 @@ export default function HodDashboardPage() {
             <Link href="/hod/classrooms" className="nd-btn nd-btn-primary">
               Manage Classrooms
             </Link>
-          </>
+          </div>
         }
       />
 
@@ -108,6 +153,13 @@ export default function HodDashboardPage() {
           {pendingReviews > 0 ? `${pendingReviews} awaiting HOD review` : "Reviews up to date"}
         </Badge>
       </div>
+
+      {resetNotice && (
+        <div className="nd-alert nd-alert-success" role="status" style={{ marginBottom: 16 }}>
+          <Check style={{ width: 16, height: 16, flexShrink: 0 }} />
+          <span>{resetNotice}</span>
+        </div>
+      )}
 
       <div className="nd-stat-grid">
         <StatCard

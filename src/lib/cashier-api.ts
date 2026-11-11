@@ -61,6 +61,21 @@ export interface GetCashierStudentsParams {
   status?: "ALL" | "PENDING" | "VERIFIED";
 }
 
+export interface CashierGlobalStudentFeeRow extends CashierStudentFeeRow {
+  classroom: {
+    id: string;
+    name: string;
+    batch: string;
+    semester: number;
+    section: string;
+  };
+  department: {
+    id: string;
+    code: string;
+    name: string;
+  };
+}
+
 export async function getCashierDashboard(): Promise<CashierDashboardStats> {
   const res = await apiClient<{ success: boolean; data: CashierDashboardStats }>("/cashier/dashboard");
   return res.data;
@@ -125,6 +140,41 @@ export async function approveCashierStudentFee(
   return res.data;
 }
 
+export async function revertCashierStudentFee(
+  studentId: string
+): Promise<{ studentId: string; reverted: boolean }> {
+  const res = await apiClient<{
+    success: boolean;
+    data: { studentId: string; reverted: boolean };
+  }>(`/cashier/students/${studentId}/fees/revert`, {
+    method: "POST",
+  });
+  return res.data;
+}
+
+export async function revertCashierAllFees(): Promise<{ revertedCount: number }> {
+  const res = await apiClient<{
+    success: boolean;
+    data: { revertedCount: number };
+  }>(`/cashier/fees/revert-all`, {
+    method: "POST",
+  });
+  return res.data;
+}
+
+export async function approveCashierBulkFees(
+  studentIds: string[]
+): Promise<{ approvedCount: number; requestedCount: number }> {
+  const res = await apiClient<{
+    success: boolean;
+    data: { approvedCount: number; requestedCount: number };
+  }>(`/cashier/students/fees/approve-bulk`, {
+    method: "POST",
+    body: JSON.stringify({ studentIds }),
+  });
+  return res.data;
+}
+
 export async function approveCashierClassroomAll(
   classroomId: string
 ): Promise<{ classroomId: string; approvedCount: number }> {
@@ -134,6 +184,20 @@ export async function approveCashierClassroomAll(
   }>(`/cashier/classrooms/${classroomId}/fees/approve-all`, {
     method: "POST",
   });
+  return res.data;
+}
+
+export async function searchCashierStudentsGlobally(
+  search: string,
+  departmentId?: string
+): Promise<CashierGlobalStudentFeeRow[]> {
+  const qs = new URLSearchParams();
+  qs.set("search", search);
+  if (departmentId) qs.set("departmentId", departmentId);
+  const res = await apiClient<{
+    success: boolean;
+    data: CashierGlobalStudentFeeRow[];
+  }>(`/cashier/students/search?${qs.toString()}`);
   return res.data;
 }
 

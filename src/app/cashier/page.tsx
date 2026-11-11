@@ -4,8 +4,13 @@ import React, { useEffect, useState, useCallback } from "react";
 import {
   getCashierDashboard,
   getCashierClassrooms,
+  searchCashierStudentsGlobally,
+  approveCashierStudentFee,
+  revertCashierStudentFee,
+  approveCashierBulkFees,
   CashierDashboardStats,
   CashierClassroom,
+  CashierGlobalStudentFeeRow,
 } from "@/lib/cashier-api";
 import { ApiError } from "@/lib/api";
 import {
@@ -19,9 +24,13 @@ import {
   Wallet,
   ShieldCheck,
   ChevronRight,
+  Zap,
+  Search,
+  Check,
+  RotateCcw,
 } from "lucide-react";
 import { PageHeader, StatCard, Card, Button, Badge, LinkButton } from "@/components/ui/controls";
-import { PageLoader, ErrorState } from "@/components/ui/feedback";
+import { PageLoader, ErrorState, ButtonSpinner, TableSkeleton } from "@/components/ui/feedback";
 import { useAuth } from "@/context/auth-context";
 import Link from "next/link";
 
@@ -31,6 +40,64 @@ export default function CashierDashboardPage() {
   const [classes, setClasses] = useState<CashierClassroom[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // ── Quick Student Fee Clearance Widget State ──
+  const [quickQuery, setQuickQuery] = useState("");
+  const [quickResults, setQuickResults] = useState<CashierGlobalStudentFeeRow[]>([]);
+  const [searchingQuick, setSearchingQuick] = useState(false);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // ── Recent Clearances (Undo Support) State ──
+  const [recentClearances, setRecentClearances] = useState<
+    { student: CashierGlobalStudentFeeRow; timestamp: number }[]
+  >([]);
+  const [revertingId, setRevertingId] = useState<string | null>(null);
+
+  // Load recent clearances from localStorage on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("cashier_recent_clearances");
+      if (stored) {
+        setRecentClearances(JSON.parse(stored));
+      }
+    } catch {}
+  }, []);
+
+  const saveRecentClearance = (student: CashierGlobalStudentFeeRow) => {
+    setRecentClearances((prev) => {
+      const filtered = prev.filter((item) => item.student.id !== student.id);
+      const updated = [{ student, timestamp: Date.now() }, ...filtered].slice(0, 8);
+      try {
+        localStorage.setItem("cashier_recent_clearances", JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
+
+  const handleRevertFee = async (item: { student: CashierGlobalStudentFeeRow }) => {
+    setRevertingId(item.student.id);
+    try {
+      await revertCashierStudentFee(item.student.id);
+      setNotice(`Fee approval reverted for ${item.student.studentName} (${item.student.registerNumber}).`);
+      setTimeout(() => setNotice(null), 5000);
+      setRecentClearances((prev) => {
+        const updated = prev.filter((r) => r.student.id !== item.student.id);
+        try {
+          localStorage.setItem("cashier_recent_clearances", JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+      setQuickResults((prev) =>
+        prev.map((s) => (s.id === item.student.id ? { ...s, verified: false, cashierApproved: false } : s))
+      );
+      load();
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : "Failed to revert fee approval.");
+    } finally {
+      setRevertingId(null);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -52,6 +119,45 @@ export default function CashierDashboardPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Quick search effect
+  useEffect(() => {
+    const q = quickQuery.trim();
+    if (!q) {
+      setQuickResults([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setSearchingQuick(true);
+      try {
+        const res = await searchCashierStudentsGlobally(q);
+        setQuickResults(res);
+      } catch {
+        setQuickResults([]);
+      } finally {
+        setSearchingQuick(false);
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [quickQuery]);
+
+  const handleQuickApprove = async (student: CashierGlobalStudentFeeRow) => {
+    setApprovingId(student.id);
+    try {
+      await approveCashierStudentFee(student.id);
+      setNotice(`Fee approved successfully for ${student.studentName} (${student.registerNumber}).`);
+      setTimeout(() => setNotice(null), 5000);
+      saveRecentClearance(student);
+      setQuickResults((prev) =>
+        prev.map((s) => (s.id === student.id ? { ...s, verified: true, cashierApproved: true } : s))
+      );
+      load();
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : "Failed to approve fee.");
+    } finally {
+      setApprovingId(null);
+    }
+  };
 
   if (loading) return <PageLoader label="Loading cashier dashboard…" />;
 
@@ -88,6 +194,108 @@ export default function CashierDashboardPage() {
           </div>
         }
       />
+
+      {notice && (
+        <div className="nd-alert nd-alert-success" role="status" style={{ marginBottom: 16 }}>
+          <Check style={{ width: 16, height: 16, flexShrink: 0 }} />
+          <span>{notice}</span>
+        </div>
+      )}
+
+      {/* ─── QUICK STUDENT CLEARANCE WIDGET ─── */}
+      <div className="nd-card" style={{ marginBottom: 20, padding: 20, background: "linear-gradient(to right, #eff6ff, #f8fafc)", border: "1px solid #bfdbfe" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+          <div style={{ width: 32, height: 32, borderRadius: 8, background: "#2563eb", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>
+            <Zap style={{ width: 18, height: 18 }} />
+          </div>
+          <div>
+            <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#1e3a8a" }}>Quick Counter Fee Clearance</h3>
+            <p style={{ fontSize: 12, color: "#64748b", margin: "2px 0 0 0" }}>Enter Student Roll No or Register No for instant one-click fee approval</p>
+          </div>
+        </div>
+
+        <div style={{ position: "relative", maxWidth: 600 }}>
+          <div className="nd-search-wrap" style={{ width: "100%" }}>
+            <Search className="nd-search-icon" style={{ width: 18, height: 18 }} />
+            <input
+              className="nd-input nd-search-input"
+              placeholder="Type Register No (e.g. 732923AMR037) or Roll No…"
+              value={quickQuery}
+              onChange={(e) => setQuickQuery(e.target.value)}
+              style={{ fontSize: 14, padding: "10px 14px 10px 38px", background: "#fff", borderColor: "#93c5fd" }}
+              aria-label="Quick counter fee clearance"
+            />
+          </div>
+        </div>
+
+        {/* Quick Results Card */}
+        {quickQuery.trim() && (
+          <div style={{ marginTop: 14 }}>
+            {searchingQuick ? (
+              <TableSkeleton rows={2} cols={4} />
+            ) : quickResults.length > 0 ? (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 12 }}>
+                {quickResults.map((st) => (
+                  <div
+                    key={st.id}
+                    style={{
+                      background: "#fff",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 10,
+                      padding: 14,
+                      display: "flex",
+                      flexDirection: "column",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <span className="nd-code" style={{ fontWeight: 700, color: "#1e40af", fontSize: 13 }}>
+                          {st.registerNumber}
+                        </span>
+                        {st.verified ? (
+                          <Badge tone="success">Fee Verified</Badge>
+                        ) : (
+                          <Badge tone="warning">Pending</Badge>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 15, fontWeight: 600, marginTop: 6 }}>{st.studentName}</div>
+                      <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+                        Roll No: <strong>{st.rollNumber || "N/A"}</strong> · {st.department?.code} ({st.classroom?.name || "Class"})
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                      {st.verified ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 4, color: "#16a34a", fontSize: 13, fontWeight: 500 }}>
+                          <CheckCircle2 style={{ width: 16, height: 16 }} />
+                          Cleared
+                        </div>
+                      ) : (
+                        <Button
+                          size="sm"
+                          onClick={() => handleQuickApprove(st)}
+                          disabled={approvingId === st.id}
+                        >
+                          {approvingId === st.id && <ButtonSpinner />}
+                          <Check style={{ width: 14, height: 14 }} />
+                          Approve Fee Now
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ padding: "10px 14px", background: "#fff", borderRadius: 8, fontSize: 13, color: "#64748b", border: "1px solid #e2e8f0" }}>
+                No student found matching &quot;{quickQuery}&quot;.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       <div style={{ marginBottom: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
         <Badge tone="success">Cashier Authority Active</Badge>
@@ -175,6 +383,79 @@ export default function CashierDashboardPage() {
                 </span>
               </div>
             </div>
+          </Card>
+
+          {/* ─── FEATURE 4: RECENT CLEARANCES & ONE-CLICK UNDO ─── */}
+          <Card
+            title="Recent Clearances"
+            description="Last approved students with one-click undo option."
+            actions={
+              recentClearances.length > 0 && (
+                <button
+                  onClick={() => {
+                    setRecentClearances([]);
+                    try {
+                      localStorage.removeItem("cashier_recent_clearances");
+                    } catch {}
+                  }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "var(--nd-text-secondary, #64748b)",
+                    fontSize: 12,
+                    cursor: "pointer",
+                  }}
+                >
+                  Clear History
+                </button>
+              )
+            }
+          >
+            {recentClearances.length === 0 ? (
+              <div style={{ fontSize: 13, color: "var(--nd-text-secondary, #64748b)", padding: "12px 0" }}>
+                No recent fee approvals in this session yet.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+                {recentClearances.map((item) => (
+                  <div
+                    key={item.student.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      border: "1px solid var(--nd-border, #e2e8f0)",
+                      background: "#fff",
+                      fontSize: 13,
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 600 }}>{item.student.studentName}</div>
+                      <div style={{ fontSize: 11, color: "var(--nd-text-secondary, #64748b)" }}>
+                        {item.student.registerNumber} · {item.student.classroom?.name}
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => handleRevertFee(item)}
+                      disabled={revertingId === item.student.id}
+                      style={{ fontSize: 12, padding: "4px 8px", height: "auto" }}
+                      title="Undo fee approval"
+                    >
+                      {revertingId === item.student.id ? (
+                        <ButtonSpinner />
+                      ) : (
+                        <RotateCcw style={{ width: 12, height: 12 }} />
+                      )}
+                      Undo
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
           </Card>
         </div>
 
