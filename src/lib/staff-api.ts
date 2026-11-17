@@ -278,3 +278,27 @@ export async function decideApproval(payload: {
   });
   return res.data;
 }
+
+export async function bulkDecideApprovals(
+  decisions: Array<{
+    studentId: string;
+    subjectId: string;
+    decision: "APPROVED" | "REJECTED";
+    remarks?: string | null;
+  }>
+) {
+  const res = await apiClient<{
+    success: boolean;
+    data: {
+      total: number;
+      approved: number;
+      failed: number;
+      results: unknown[];
+      errors: unknown[];
+    };
+  }>("/staff/approvals/bulk", {
+    method: "POST",
+    data: { decisions },
+  });
+  return res.data;
+}

@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
-import { getStaffApprovals, getStaffSubjects, PendingPair, DecidedApproval, DecisionStatus, decideApproval, StaffSubject } from "@/lib/staff-api";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
+import { getStaffApprovals, getStaffSubjects, PendingPair, DecidedApproval, DecisionStatus, decideApproval, bulkDecideApprovals, StaffSubject } from "@/lib/staff-api";
 import { ApiError } from "@/lib/api";
-import { Search, RefreshCw, Check, X } from "lucide-react";
+import { Search, RefreshCw, Check, X, CheckSquare } from "lucide-react";
 import { PageHeader, Badge, Button, Input } from "@/components/ui/controls";
 import { Modal } from "@/components/ui/overlays";
 import { TableSkeleton, EmptyState, ErrorState, Pagination, ButtonSpinner } from "@/components/ui/feedback";  import { StatusBadge } from "@/components/ui/status";
@@ -35,6 +35,10 @@ export default function StaffApprovalsPage() {
   const [remarksError, setRemarksError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+
+  // Multi-select state
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
 
   // Load staff assigned subjects for filtering
   useEffect(() => {
@@ -90,6 +94,64 @@ export default function StaffApprovalsPage() {
     const t = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(t);
   }, [load, search]);
+
+  // Clear selections when page, filter, or rows change
+  useEffect(() => {
+    setSelectedKeys(new Set());
+  }, [currentPage, statusFilter, subjectFilter]);
+
+  const pendingRows = useMemo(() => {
+    return rows.filter((r): r is PendingPair => !isDecided(r));
+  }, [rows]);
+
+  const allPendingSelected = useMemo(() => {
+    if (pendingRows.length === 0) return false;
+    return pendingRows.every((r) => selectedKeys.has(`${r.student.id}-${r.subject.id}`));
+  }, [pendingRows, selectedKeys]);
+
+  const toggleSelectAll = () => {
+    if (allPendingSelected) {
+      setSelectedKeys(new Set());
+    } else {
+      const next = new Set<string>();
+      pendingRows.forEach((r) => next.add(`${r.student.id}-${r.subject.id}`));
+      setSelectedKeys(next);
+    }
+  };
+
+  const toggleRow = (key: string) => {
+    const next = new Set(selectedKeys);
+    if (next.has(key)) {
+      next.delete(key);
+    } else {
+      next.add(key);
+    }
+    setSelectedKeys(next);
+  };
+
+  const handleBulkApprove = async () => {
+    const toApprove = pendingRows.filter((r) => selectedKeys.has(`${r.student.id}-${r.subject.id}`));
+    if (toApprove.length === 0) return;
+
+    setBulkSubmitting(true);
+    try {
+      const res = await bulkDecideApprovals(
+        toApprove.map((r) => ({
+          studentId: r.student.id,
+          subjectId: r.subject.id,
+          decision: "APPROVED",
+        }))
+      );
+      setNotice(`Successfully approved ${res.approved} student${res.approved !== 1 ? "s" : ""}.`);
+      setTimeout(() => setNotice(null), 5000);
+      setSelectedKeys(new Set());
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to bulk approve students.");
+    } finally {
+      setBulkSubmitting(false);
+    }
+  };
 
   const openDecision = (row: PendingPair, d: "APPROVED" | "REJECTED") => {
     setActing(row);
@@ -179,6 +241,51 @@ export default function StaffApprovalsPage() {
         </select>
       </ApprovalFilterBar>
 
+      {statusFilter === "pending" && pendingRows.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            background: "#f8fafc",
+            border: "1px solid #e2e8f0",
+            borderRadius: 8,
+            padding: "10px 16px",
+            marginBottom: 16,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <input
+              type="checkbox"
+              id="select-all-pending"
+              checked={allPendingSelected}
+              onChange={toggleSelectAll}
+              style={{ width: 16, height: 16, cursor: "pointer", accentColor: "#2563eb" }}
+            />
+            <label
+              htmlFor="select-all-pending"
+              style={{ fontSize: 13.5, fontWeight: 500, color: "#334155", cursor: "pointer" }}
+            >
+              {selectedKeys.size > 0
+                ? `${selectedKeys.size} of ${pendingRows.length} selected`
+                : "Select All Pending"}
+            </label>
+          </div>
+
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleBulkApprove}
+            disabled={selectedKeys.size === 0 || bulkSubmitting}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+          >
+            {bulkSubmitting && <ButtonSpinner />}
+            <CheckSquare style={{ width: 14, height: 14 }} />
+            Approve Selected ({selectedKeys.size})
+          </Button>
+        </div>
+      )}
+
       {error && !loading && (
         <div className="nd-card" style={{ marginBottom: 16 }}>
           <ErrorState message={error} onRetry={load} />
@@ -204,6 +311,17 @@ export default function StaffApprovalsPage() {
             <table className="nd-table" data-testid="advisor-approvals-table">
               <thead>
                 <tr>
+                  {statusFilter === "pending" && (
+                    <th style={{ width: 40, textAlign: "center" }}>
+                      <input
+                        type="checkbox"
+                        checked={allPendingSelected}
+                        onChange={toggleSelectAll}
+                        style={{ cursor: "pointer", accentColor: "#2563eb" }}
+                        aria-label="Select all"
+                      />
+                    </th>
+                  )}
                   <th>Student</th>
                   <th>Classroom</th>
                   <th>Subject</th>
@@ -214,8 +332,24 @@ export default function StaffApprovalsPage() {
               <tbody>
                 {rows.map((row) => {
                   const key = isDecided(row) ? row.id : `${row.student.id}-${row.subject.id}`;
+                  const isSelected = selectedKeys.has(key);
                   return (
-                    <tr key={key}>
+                    <tr
+                      key={key}
+                      style={isSelected ? { backgroundColor: "#f0f7ff" } : undefined}
+                    >
+                      {statusFilter === "pending" && !isDecided(row) && (
+                        <td style={{ width: 40, textAlign: "center" }}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleRow(key)}
+                            style={{ cursor: "pointer", accentColor: "#2563eb" }}
+                            aria-label={`Select ${row.student.user.firstName}`}
+                          />
+                        </td>
+                      )}
+                      {statusFilter === "pending" && isDecided(row) && <td></td>}
                       <td>
                         <div className="nd-user-cell">
                           <div className="nd-avatar" aria-hidden="true">
