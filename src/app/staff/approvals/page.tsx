@@ -1,9 +1,9 @@
 "use client";
 
 import React, { useEffect, useState, useCallback, useMemo } from "react";
-import { getStaffApprovals, getStaffSubjects, PendingPair, DecidedApproval, DecisionStatus, decideApproval, bulkDecideApprovals, StaffSubject } from "@/lib/staff-api";
+import { getStaffApprovals, getStaffSubjects, PendingPair, DecidedApproval, DecisionStatus, decideApproval, bulkDecideApprovals, revertStaffApproval, StaffSubject } from "@/lib/staff-api";
 import { ApiError } from "@/lib/api";
-import { Search, RefreshCw, Check, X, CheckSquare } from "lucide-react";
+import { Search, RefreshCw, Check, X, CheckSquare, Undo2 } from "lucide-react";
 import { PageHeader, Badge, Button, Input } from "@/components/ui/controls";
 import { Modal } from "@/components/ui/overlays";
 import { TableSkeleton, EmptyState, ErrorState, Pagination, ButtonSpinner } from "@/components/ui/feedback";  import { StatusBadge } from "@/components/ui/status";
@@ -35,6 +35,7 @@ export default function StaffApprovalsPage() {
   const [remarksError, setRemarksError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [revertingKey, setRevertingKey] = useState<string | null>(null);
 
   // Multi-select state
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
@@ -185,6 +186,25 @@ export default function StaffApprovalsPage() {
       setRemarksError(err instanceof ApiError ? err.message : "Failed to record decision.");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleRevert = async (studentId: string, subjectId: string, studentName: string) => {
+    if (!confirm(`Are you sure you want to revert the decision for ${studentName}? This student will return to the pending list.`)) {
+      return;
+    }
+    const key = `${studentId}-${subjectId}`;
+    setRevertingKey(key);
+    setError(null);
+    try {
+      await revertStaffApproval({ studentId, subjectId });
+      setNotice(`Decision for ${studentName} was reverted to pending.`);
+      setTimeout(() => setNotice(null), 5000);
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to revert approval.");
+    } finally {
+      setRevertingKey(null);
     }
   };
 
@@ -383,9 +403,34 @@ export default function StaffApprovalsPage() {
                       </td>
                       <td style={{ textAlign: "right" }}>
                         {isDecided(row) ? (
-                          <span className="nd-cell-secondary" style={{ fontSize: 12.5 }}>
-                            {new Date(row.updatedAt).toLocaleDateString("en-IN")}
-                          </span>
+                          <div style={{ display: "inline-flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                            <span className="nd-cell-secondary" style={{ fontSize: 12.5 }}>
+                              {new Date(row.updatedAt).toLocaleDateString("en-IN")}
+                            </span>
+                            {row.subject && (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() =>
+                                  handleRevert(
+                                    row.student.id,
+                                    row.subject!.id,
+                                    `${row.student.user.firstName} ${row.student.user.lastName}`
+                                  )
+                                }
+                                disabled={revertingKey === `${row.student.id}-${row.subject.id}`}
+                                aria-label={`Revert approval for ${row.student.user.firstName}`}
+                                title="Revert decision back to pending"
+                              >
+                                {revertingKey === `${row.student.id}-${row.subject.id}` ? (
+                                  <ButtonSpinner />
+                                ) : (
+                                  <Undo2 style={{ width: 13, height: 13 }} />
+                                )}
+                                Revert
+                              </Button>
+                            )}
+                          </div>
                         ) : (
                           <div style={{ display: "inline-flex", gap: 6 }}>
                             <Button

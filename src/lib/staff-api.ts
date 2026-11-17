@@ -302,3 +302,14 @@ export async function bulkDecideApprovals(
   });
   return res.data;
 }
+
+export async function revertStaffApproval(payload: { studentId: string; subjectId: string }) {
+  const res = await apiClient<{ success: boolean; data: { studentId: string; subjectId: string; reverted: boolean } }>(
+    "/staff/approvals/revert",
+    {
+      method: "POST",
+      data: payload,
+    }
+  );
+  return res.data;
+}

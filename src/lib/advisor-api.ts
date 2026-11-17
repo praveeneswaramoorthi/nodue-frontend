@@ -467,6 +467,16 @@ export async function bulkDecideAdvisorApprovals(
   return res.data;
 }
 
+export async function revertAdvisorApproval(studentId: string) {
+  const res = await apiClient<{ success: boolean; data: { studentId: string; reverted: boolean } }>(
+    `/advisor/approvals/${studentId}/revert`,
+    {
+      method: "POST",
+    }
+  );
+  return res.data;
+}
+
 // ─── Final Verification (derived NoDue completion) ──────────────────────────
 // Read-only list of students in the advisor's own classroom whose overall
 // NoDue process is complete (engine-owned Student.isVerified). No financial
