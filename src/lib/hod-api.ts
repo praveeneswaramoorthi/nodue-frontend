@@ -332,6 +332,29 @@ export async function decideHodApproval(payload: {
   return res.data;
 }
 
+export async function bulkDecideHodApprovals(
+  decisions: Array<{
+    studentId: string;
+    decision: "APPROVED" | "REJECTED";
+    remarks?: string | null;
+  }>
+) {
+  const res = await apiClient<{
+    success: boolean;
+    data: {
+      total: number;
+      approved: number;
+      failed: number;
+      results: unknown[];
+      errors: unknown[];
+    };
+  }>("/hod/approvals/bulk", {
+    method: "POST",
+    data: { decisions },
+  });
+  return res.data;
+}
+
 // ─── Fee Verifications ──────────────────────────────────────────────────────
 
 export interface FeeVerificationRow {
