@@ -5,6 +5,7 @@ import {
   getAdvisorSubjects,
   createAdvisorSubject,
   updateAdvisorSubject,
+  deleteAdvisorSubject,
   getAdvisorSubjectById,
   getAdvisorStaff,
   getAdvisorStaffAvailable,
@@ -17,7 +18,7 @@ import {
   AdvisorDepartmentOption,
 } from "@/lib/advisor-api";
 import { ApiError } from "@/lib/api";
-import { Plus, Search, RefreshCw, X, UploadCloud } from "lucide-react";
+import { Plus, Search, RefreshCw, X, UploadCloud, Trash2 } from "lucide-react";
 import { PageHeader, Badge, Button, Input, Select } from "@/components/ui/controls";
 import { Modal } from "@/components/ui/overlays";
 import { TableSkeleton, EmptyState, ErrorState, Pagination, ButtonSpinner } from "@/components/ui/feedback";
@@ -57,6 +58,10 @@ export default function AdvisorSubjectsPage() {
   const [editForm, setEditForm] = useState({ name: "", credits: 3, semester: 1 });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+
+  const [deletingSubject, setDeletingSubject] = useState<AdvisorSubject | null>(null);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -237,6 +242,21 @@ export default function AdvisorSubjectsPage() {
     }
   };
 
+  const handleDelete = async () => {
+    if (!deletingSubject) return;
+    setDeleteSubmitting(true);
+    setDeleteError(null);
+    try {
+      await deleteAdvisorSubject(deletingSubject.id);
+      setDeletingSubject(null);
+      load();
+    } catch (err) {
+      setDeleteError(err instanceof ApiError ? err.message : "Failed to delete subject.");
+    } finally {
+      setDeleteSubmitting(false);
+    }
+  };
+
   return (
     <div>
       <PageHeader
@@ -345,6 +365,18 @@ export default function AdvisorSubjectsPage() {
                         </Button>
                         <Button variant="ghost" size="sm" onClick={() => openEdit(s)}>
                           Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setDeletingSubject(s);
+                            setDeleteError(null);
+                          }}
+                          style={{ color: "#ef4444" }}
+                          aria-label={`Delete ${s.name}`}
+                        >
+                          <Trash2 style={{ width: 14, height: 14 }} />
                         </Button>
                       </div>
                     </td>
@@ -506,6 +538,39 @@ export default function AdvisorSubjectsPage() {
               </Select>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {deletingSubject && (
+        <Modal
+          title="Delete Subject"
+          description={`Are you sure you want to delete ${deletingSubject.name} (${deletingSubject.code})?`}
+          onClose={() => setDeletingSubject(null)}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setDeletingSubject(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleDelete}
+                disabled={deleteSubmitting}
+                style={{ backgroundColor: "#ef4444", borderColor: "#ef4444", color: "#ffffff" }}
+              >
+                {deleteSubmitting && <ButtonSpinner />}
+                {deleteSubmitting ? "Deleting…" : "Delete"}
+              </Button>
+            </>
+          }
+        >
+          {deleteError && (
+            <div className="nd-alert nd-alert-error" role="alert" style={{ marginBottom: 12 }}>
+              <span>{deleteError}</span>
+            </div>
+          )}
+          <p className="nd-cell-secondary">
+            This will permanently remove the subject and any assigned staff mappings for your classroom.
+          </p>
         </Modal>
       )}
 

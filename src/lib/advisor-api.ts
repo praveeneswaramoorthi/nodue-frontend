@@ -301,6 +301,16 @@ export async function updateAdvisorSubject(
   return res.data;
 }
 
+export async function deleteAdvisorSubject(id: string) {
+  const res = await apiClient<{ success: boolean; data: { id: string; code: string; name: string } }>(
+    `/advisor/subjects/${id}`,
+    {
+      method: "DELETE",
+    }
+  );
+  return res.data;
+}
+
 export async function getAdvisorSubjectById(id: string): Promise<AdvisorSubject> {
   const res = await apiClient<{ success: boolean; data: AdvisorSubject }>(`/advisor/subjects/${id}`);
   return res.data;
