@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import {
   getAdvisorApprovals,
   decideAdvisorApproval,
+  bulkDecideAdvisorApprovals,
   getAdvisorStudentStatus,
   approveStudentFeeVerification,
   AdvisorPendingRow,
@@ -11,7 +12,7 @@ import {
   AdvisorQueueStatus,
 } from "@/lib/advisor-api";
 import { ApiError } from "@/lib/api";
-import { Search, RefreshCw, Check, X, Activity, CreditCard } from "lucide-react";
+import { Search, RefreshCw, Check, X, Activity, CreditCard, CheckSquare } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { PageHeader, Badge, Button, Input } from "@/components/ui/controls";
 import { Modal } from "@/components/ui/overlays";
@@ -46,6 +47,10 @@ export default function AdvisorApprovalsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [feeVerifying, setFeeVerifying] = useState<string | null>(null);
+
+  // Multi-select state for bulk approvals
+  const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
 
   const fetchTabCounts = useCallback(async (searchQuery: string) => {
     try {
@@ -92,6 +97,62 @@ export default function AdvisorApprovalsPage() {
     const t = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(t);
   }, [load, search]);
+
+  useEffect(() => {
+    setSelectedStudentIds(new Set());
+  }, [currentPage, statusFilter]);
+
+  const pendingRows = useMemo(() => {
+    return rows.filter((r): r is AdvisorPendingRow => !isDecided(r));
+  }, [rows]);
+
+  const allPendingSelected = useMemo(() => {
+    if (pendingRows.length === 0) return false;
+    return pendingRows.every((r) => selectedStudentIds.has(r.student.id));
+  }, [pendingRows, selectedStudentIds]);
+
+  const toggleSelectAll = () => {
+    if (allPendingSelected) {
+      setSelectedStudentIds(new Set());
+    } else {
+      const next = new Set<string>();
+      pendingRows.forEach((r) => next.add(r.student.id));
+      setSelectedStudentIds(next);
+    }
+  };
+
+  const toggleStudent = (studentId: string) => {
+    const next = new Set(selectedStudentIds);
+    if (next.has(studentId)) {
+      next.delete(studentId);
+    } else {
+      next.add(studentId);
+    }
+    setSelectedStudentIds(next);
+  };
+
+  const handleBulkApprove = async () => {
+    const toApprove = pendingRows.filter((r) => selectedStudentIds.has(r.student.id));
+    if (toApprove.length === 0) return;
+
+    setBulkSubmitting(true);
+    try {
+      const res = await bulkDecideAdvisorApprovals(
+        toApprove.map((r) => ({
+          studentId: r.student.id,
+          decision: "APPROVED",
+        }))
+      );
+      setNotice(`Successfully approved ${res.approved} student${res.approved !== 1 ? "s" : ""}.`);
+      setTimeout(() => setNotice(null), 5000);
+      setSelectedStudentIds(new Set());
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to bulk approve students.");
+    } finally {
+      setBulkSubmitting(false);
+    }
+  };
 
   const openDecision = (row: AdvisorPendingRow, d: "APPROVED" | "REJECTED") => {
     setActing(row);
@@ -177,6 +238,51 @@ export default function AdvisorApprovalsPage() {
         counts={counts}
       />
 
+      {statusFilter === "pending" && pendingRows.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            background: "#f8fafc",
+            border: "1px solid #e2e8f0",
+            borderRadius: 8,
+            padding: "10px 16px",
+            marginBottom: 16,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <input
+              type="checkbox"
+              id="advisor-select-all-pending"
+              checked={allPendingSelected}
+              onChange={toggleSelectAll}
+              style={{ width: 16, height: 16, cursor: "pointer", accentColor: "#2563eb" }}
+            />
+            <label
+              htmlFor="advisor-select-all-pending"
+              style={{ fontSize: 13.5, fontWeight: 500, color: "#334155", cursor: "pointer" }}
+            >
+              {selectedStudentIds.size > 0
+                ? `${selectedStudentIds.size} of ${pendingRows.length} selected`
+                : "Select All Pending"}
+            </label>
+          </div>
+
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleBulkApprove}
+            disabled={selectedStudentIds.size === 0 || bulkSubmitting}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+          >
+            {bulkSubmitting && <ButtonSpinner />}
+            <CheckSquare style={{ width: 14, height: 14 }} />
+            Approve Selected ({selectedStudentIds.size})
+          </Button>
+        </div>
+      )}
+
       {error && !loading && (
         <div className="nd-card" style={{ marginBottom: 16 }}>
           <ErrorState message={error} onRetry={load} />
@@ -202,6 +308,17 @@ export default function AdvisorApprovalsPage() {
             <table className="nd-table" data-testid="advisor-approvals-table">
               <thead>
                 <tr>
+                  {statusFilter === "pending" && (
+                    <th style={{ width: 40, textAlign: "center" }}>
+                      <input
+                        type="checkbox"
+                        checked={allPendingSelected}
+                        onChange={toggleSelectAll}
+                        style={{ cursor: "pointer", accentColor: "#2563eb" }}
+                        aria-label="Select all pending students"
+                      />
+                    </th>
+                  )}
                   <th>Student</th>
                   <th>Subjects</th>
                   <th>Fee Status</th>
@@ -212,13 +329,29 @@ export default function AdvisorApprovalsPage() {
               <tbody>
                 {rows.map((row) => {
                   const key = isDecided(row) ? row.id : row.student.id;
+                  const isSelected = selectedStudentIds.has(row.student.id);
                   const feeVerified = Boolean(
                     row.student.feeVerification?.verified ||
                     row.student.feeVerification?.advisorApproved ||
                     row.student.feeVerification?.hodApproved
                   );
                   return (
-                    <tr key={key}>
+                    <tr
+                      key={key}
+                      style={isSelected ? { backgroundColor: "#f0f7ff" } : undefined}
+                    >
+                      {statusFilter === "pending" && !isDecided(row) && (
+                        <td style={{ width: 40, textAlign: "center" }}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleStudent(row.student.id)}
+                            style={{ cursor: "pointer", accentColor: "#2563eb" }}
+                            aria-label={`Select ${row.student.user.firstName}`}
+                          />
+                        </td>
+                      )}
+                      {statusFilter === "pending" && isDecided(row) && <td></td>}
                       <td>
                         <div className="nd-user-cell">
                           <div className="nd-avatar" aria-hidden="true">

@@ -444,6 +444,29 @@ export async function decideAdvisorApproval(payload: {
   return res.data;
 }
 
+export async function bulkDecideAdvisorApprovals(
+  decisions: Array<{
+    studentId: string;
+    decision: "APPROVED" | "REJECTED";
+    remarks?: string | null;
+  }>
+) {
+  const res = await apiClient<{
+    success: boolean;
+    data: {
+      total: number;
+      approved: number;
+      failed: number;
+      results: unknown[];
+      errors: unknown[];
+    };
+  }>("/advisor/approvals/bulk", {
+    method: "POST",
+    data: { decisions },
+  });
+  return res.data;
+}
+
 // ─── Final Verification (derived NoDue completion) ──────────────────────────
 // Read-only list of students in the advisor's own classroom whose overall
 // NoDue process is complete (engine-owned Student.isVerified). No financial
