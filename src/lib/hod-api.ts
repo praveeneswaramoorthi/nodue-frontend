@@ -332,6 +332,16 @@ export async function decideHodApproval(payload: {
   return res.data;
 }
 
+export async function revertHodApproval(studentId: string) {
+  const res = await apiClient<{ success: boolean; data: { studentId: string; reverted: boolean } }>(
+    `/hod/approvals/${studentId}/revert`,
+    {
+      method: "POST",
+    }
+  );
+  return res.data;
+}
+
 export async function bulkDecideHodApprovals(
   decisions: Array<{
     studentId: string;

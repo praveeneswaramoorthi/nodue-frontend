@@ -5,6 +5,7 @@ import {
   getHodApprovals,
   decideHodApproval,
   bulkDecideHodApprovals,
+  revertHodApproval,
   getHodStudentStatus,
   approveStudentFeeVerification,
   HodPendingRow,
@@ -12,7 +13,7 @@ import {
   HodQueueStatus,
 } from "@/lib/hod-api";
 import { ApiError } from "@/lib/api";
-import { Search, RefreshCw, Check, X, Activity, CreditCard, CheckSquare } from "lucide-react";
+import { Search, RefreshCw, Check, X, Activity, CreditCard, CheckSquare, Undo2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { PageHeader, Badge, Button, Input } from "@/components/ui/controls";
 import { Modal } from "@/components/ui/overlays";
@@ -47,6 +48,7 @@ export default function HodApprovalsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [feeVerifying, setFeeVerifying] = useState<string | null>(null);
+  const [revertingId, setRevertingId] = useState<string | null>(null);
 
   // Multi-select state for bulk approvals
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
@@ -173,6 +175,24 @@ export default function HodApprovalsPage() {
       setError(err instanceof ApiError ? err.message : "Failed to approve fee.");
     } finally {
       setFeeVerifying(null);
+    }
+  };
+
+  const handleRevert = async (studentId: string, studentName: string) => {
+    if (!confirm(`Are you sure you want to revert the approval decision for ${studentName}? The student will return to the pending queue.`)) {
+      return;
+    }
+    setRevertingId(studentId);
+    setError(null);
+    try {
+      await revertHodApproval(studentId);
+      setNotice(`Approval decision for ${studentName} was reverted. Student is now pending review.`);
+      setTimeout(() => setNotice(null), 5000);
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to revert approval.");
+    } finally {
+      setRevertingId(null);
     }
   };
 
@@ -420,9 +440,31 @@ export default function HodApprovalsPage() {
                           )}
 
                           {isDecided(row) ? (
-                            <span className="nd-cell-secondary" style={{ fontSize: 12.5 }}>
-                              {new Date(row.updatedAt).toLocaleDateString("en-IN")}
-                            </span>
+                            <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                              <span className="nd-cell-secondary" style={{ fontSize: 12.5 }}>
+                                {new Date(row.updatedAt).toLocaleDateString("en-IN")}
+                              </span>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() =>
+                                  handleRevert(
+                                    row.student.id,
+                                    `${row.student.user.firstName} ${row.student.user.lastName}`
+                                  )
+                                }
+                                disabled={revertingId === row.student.id}
+                                aria-label={`Revert approval for ${row.student.user.firstName}`}
+                                title="Revert decision back to pending"
+                              >
+                                {revertingId === row.student.id ? (
+                                  <ButtonSpinner />
+                                ) : (
+                                  <Undo2 style={{ width: 13, height: 13 }} />
+                                )}
+                                Revert
+                              </Button>
+                            </div>
                           ) : (
                             <>
                               <Button
