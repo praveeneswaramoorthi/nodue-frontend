@@ -1,17 +1,19 @@
 "use client";
 
 import React, { useEffect, useState, useCallback } from "react";
-import { getDashboardStats, DashboardStats } from "@/lib/admin-api";
+import { getDashboardStats, downloadMasterClearanceSummary, downloadMasterDefaulters, DashboardStats } from "@/lib/admin-api";
 import { ApiError } from "@/lib/api";
-import { Building2, UserCheck, Users, PieChart, RefreshCw } from "lucide-react";
+import { Building2, UserCheck, Users, PieChart, RefreshCw, Download, FileSpreadsheet, AlertTriangle } from "lucide-react";
 import { PageHeader, StatCard, Card, Button } from "@/components/ui/controls";
-import { PageLoader, ErrorState, ActivityList } from "@/components/ui/feedback";
+import { PageLoader, ErrorState, ActivityList, ButtonSpinner } from "@/components/ui/feedback";
 import { humanizeActivity } from "@/lib/activity";
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [downloadingSummary, setDownloadingSummary] = useState(false);
+  const [downloadingDefaulters, setDownloadingDefaulters] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -29,6 +31,44 @@ export default function AdminDashboard() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const handleExportSummary = async () => {
+    setDownloadingSummary(true);
+    try {
+      const blob = await downloadMasterClearanceSummary();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `college-master-clearance-${new Date().toISOString().split("T")[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      alert("Failed to export clearance summary report.");
+    } finally {
+      setDownloadingSummary(false);
+    }
+  };
+
+  const handleExportDefaulters = async () => {
+    setDownloadingDefaulters(true);
+    try {
+      const blob = await downloadMasterDefaulters();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `college-defaulters-list-${new Date().toISOString().split("T")[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      alert("Failed to export defaulters report.");
+    } finally {
+      setDownloadingDefaulters(false);
+    }
+  };
 
   if (loading) return <PageLoader label="Loading dashboard…" />;
   if (error || !stats) {
@@ -56,10 +96,30 @@ export default function AdminDashboard() {
         title="Dashboard"
         description="System-wide overview of departments, people, and HOD coverage."
         actions={
-          <Button variant="secondary" onClick={load}>
-            <RefreshCw style={{ width: 14, height: 14 }} />
-            Refresh
-          </Button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Button
+              variant="secondary"
+              onClick={handleExportSummary}
+              disabled={downloadingSummary}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
+              {downloadingSummary ? <ButtonSpinner /> : <FileSpreadsheet style={{ width: 14, height: 14 }} />}
+              Master Clearance Register
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={handleExportDefaulters}
+              disabled={downloadingDefaulters}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
+              {downloadingDefaulters ? <ButtonSpinner /> : <AlertTriangle style={{ width: 14, height: 14, color: "#d97706" }} />}
+              College Defaulters List
+            </Button>
+            <Button variant="secondary" onClick={load}>
+              <RefreshCw style={{ width: 14, height: 14 }} />
+              Refresh
+            </Button>
+          </div>
         }
       />
 

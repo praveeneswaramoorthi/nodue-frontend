@@ -334,3 +334,25 @@ export async function getAuditLogs(
     `/admin/audit-logs${query ? `?${query}` : ""}`
   );
 }
+
+// ─── Master Clearance Reports ────────────────────────────────────────────────
+
+export async function downloadMasterClearanceSummary(): Promise<Blob> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("nd_token") : null;
+  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "https://nodue-backend-w83a.onrender.com/api/v1"}/admin/reports/clearance/export`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error("Failed to download master clearance report");
+  return res.blob();
+}
+
+export async function downloadMasterDefaulters(): Promise<Blob> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("nd_token") : null;
+  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "https://nodue-backend-w83a.onrender.com/api/v1"}/admin/reports/defaulters/export`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error("Failed to download master defaulters list");
+  return res.blob();
+}
