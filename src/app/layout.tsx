@@ -3,6 +3,7 @@ import "./globals.css";
 import { AuthProvider } from "../context/auth-context";
 import SwCleanup from "../components/SwCleanup";
 import { SW_CLEANUP_INLINE_SCRIPT } from "../lib/sw-cleanup";
+import { Analytics } from "@vercel/analytics/next";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://nodue-platform.vercel.app";
 
@@ -120,6 +121,7 @@ export default function RootLayout({
         <AuthProvider>
           <SwCleanup />
           {children}
+          <Analytics />
         </AuthProvider>
       </body>
     </html>
