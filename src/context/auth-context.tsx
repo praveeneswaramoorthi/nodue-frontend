@@ -61,12 +61,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async (email: string, password: string) => {
     setLoading(true);
     try {
-      const res = await apiClient<{ success: boolean; data: { user: User } }>("/auth/login", {
+      const res = await apiClient<{
+        success: boolean;
+        data: {
+          user: User;
+          accessToken?: string;
+          refreshToken?: string;
+        };
+      }>("/auth/login", {
         method: "POST",
         data: { email, password },
       });
 
       if (res.success && res.data.user) {
+        // Persist token in localStorage for browsers blocking 3rd-party cross-origin cookies (Safari on iOS/macOS, Helium)
+        if (typeof window !== "undefined") {
+          if (res.data.accessToken) {
+            localStorage.setItem("nd_access_token", res.data.accessToken);
+          }
+          if (res.data.refreshToken) {
+            localStorage.setItem("nd_refresh_token", res.data.refreshToken);
+          }
+        }
+
         // Set the frontend-domain session cookie immediately so the
         // Next.js middleware sees the role on the very first navigation.
         setSessionCookie(res.data.user.role);
@@ -86,6 +103,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       console.warn("Logout error:", err);
     } finally {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("nd_access_token");
+        localStorage.removeItem("nd_refresh_token");
+      }
       clearSessionCookie();
       setUser(null);
       setLoading(false);

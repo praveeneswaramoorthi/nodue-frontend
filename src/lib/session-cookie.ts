@@ -16,14 +16,20 @@ const SESSION_COOKIE = "nd_session";
 /** Write `nd_session=<role>` on the current (frontend) domain. */
 export function setSessionCookie(role: string): void {
   if (typeof document === "undefined") return;
-  // 15 minutes – kept in sync with the access_token maxAge.
-  const maxAge = 15 * 60;
-  const secure = location.protocol === "https:" ? "; Secure" : "";
-  document.cookie = `${SESSION_COOKIE}=${role}; path=/; max-age=${maxAge}; SameSite=Lax${secure}`;
+  // 7 days – matches refresh token lifetime so mobile Safari doesn't expire early
+  const maxAge = 7 * 24 * 60 * 60;
+  const isHttps = typeof location !== "undefined" && location.protocol === "https:";
+  const secure = isHttps ? "; Secure" : "";
+  // SameSite=None + Secure is mandatory for cross-site / embedded / Safari ITP contexts, Lax for standard HTTP
+  const sameSite = isHttps ? "; SameSite=None" : "; SameSite=Lax";
+  document.cookie = `${SESSION_COOKIE}=${role}; path=/${sameSite}${secure}; max-age=${maxAge}`;
 }
 
 /** Remove the nd_session cookie. */
 export function clearSessionCookie(): void {
   if (typeof document === "undefined") return;
-  document.cookie = `${SESSION_COOKIE}=; path=/; max-age=0; SameSite=Lax`;
+  const isHttps = typeof location !== "undefined" && location.protocol === "https:";
+  const secure = isHttps ? "; Secure" : "";
+  const sameSite = isHttps ? "; SameSite=None" : "; SameSite=Lax";
+  document.cookie = `${SESSION_COOKIE}=; path=/${sameSite}${secure}; max-age=0`;
 }

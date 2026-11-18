@@ -48,13 +48,33 @@ const processQueue = (error: Error | null) => {
 };
 
 const refreshSession = async (): Promise<void> => {
+  const storedRefreshToken = typeof window !== "undefined" ? localStorage.getItem("nd_refresh_token") : null;
+  const storedAccessToken = typeof window !== "undefined" ? localStorage.getItem("nd_access_token") : null;
+
   const refreshRes = await fetch(`${BASE_URL}/auth/refresh`, {
     method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(storedAccessToken ? { Authorization: `Bearer ${storedAccessToken}` } : {}),
+    },
     credentials: "include",
+    body: storedRefreshToken ? JSON.stringify({ refreshToken: storedRefreshToken }) : undefined,
   });
 
   if (!refreshRes.ok) {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("nd_access_token");
+      localStorage.removeItem("nd_refresh_token");
+    }
     throw new ApiError("Session expired", 401, "UNAUTHORIZED");
+  }
+
+  const data = await refreshRes.json();
+  if (data?.data?.accessToken && typeof window !== "undefined") {
+    localStorage.setItem("nd_access_token", data.data.accessToken);
+    if (data.data.refreshToken) {
+      localStorage.setItem("nd_refresh_token", data.data.refreshToken);
+    }
   }
 };
 
@@ -79,6 +99,14 @@ export async function apiClient<T>(endpoint: string, options: RequestOptions = {
   const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
   if (hasBody && !headers["Content-Type"] && !isFormData) {
     headers["Content-Type"] = "application/json";
+  }
+
+  // Fallback Bearer header for browsers blocking 3rd-party cookies (Safari on iOS/macOS, Helium browser)
+  if (!headers["Authorization"] && typeof window !== "undefined") {
+    const storedToken = localStorage.getItem("nd_access_token");
+    if (storedToken) {
+      headers["Authorization"] = `Bearer ${storedToken}`;
+    }
   }
 
   const config: RequestInit = {
