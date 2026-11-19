@@ -1,9 +1,9 @@
 "use client";
 
 import React, { useEffect, useState, useCallback } from "react";
-import { getDashboardStats, downloadMasterClearanceSummary, downloadMasterDefaulters, DashboardStats } from "@/lib/admin-api";
+import { getDashboardStats, downloadMasterClearancePdf, downloadMasterDefaultersPdf, DashboardStats } from "@/lib/admin-api";
 import { ApiError } from "@/lib/api";
-import { Building2, UserCheck, Users, PieChart, RefreshCw, Download, FileSpreadsheet, AlertTriangle } from "lucide-react";
+import { Building2, UserCheck, Users, PieChart, RefreshCw, FileText, AlertTriangle } from "lucide-react";
 import { PageHeader, StatCard, Card, Button } from "@/components/ui/controls";
 import { PageLoader, ErrorState, ActivityList, ButtonSpinner } from "@/components/ui/feedback";
 import { humanizeActivity } from "@/lib/activity";
@@ -35,17 +35,9 @@ export default function AdminDashboard() {
   const handleExportSummary = async () => {
     setDownloadingSummary(true);
     try {
-      const blob = await downloadMasterClearanceSummary();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `college-master-clearance-${new Date().toISOString().split("T")[0]}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
+      await downloadMasterClearancePdf();
     } catch {
-      alert("Failed to export clearance summary report.");
+      alert("Failed to export clearance summary PDF.");
     } finally {
       setDownloadingSummary(false);
     }
@@ -54,17 +46,9 @@ export default function AdminDashboard() {
   const handleExportDefaulters = async () => {
     setDownloadingDefaulters(true);
     try {
-      const blob = await downloadMasterDefaulters();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `college-defaulters-list-${new Date().toISOString().split("T")[0]}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
+      await downloadMasterDefaultersPdf();
     } catch {
-      alert("Failed to export defaulters report.");
+      alert("Failed to export defaulters PDF.");
     } finally {
       setDownloadingDefaulters(false);
     }
@@ -103,8 +87,8 @@ export default function AdminDashboard() {
               disabled={downloadingSummary}
               style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
             >
-              {downloadingSummary ? <ButtonSpinner /> : <FileSpreadsheet style={{ width: 14, height: 14 }} />}
-              Master Clearance Register
+              {downloadingSummary ? <ButtonSpinner /> : <FileText style={{ width: 14, height: 14, color: "#2563eb" }} />}
+              Master Clearance Register (PDF)
             </Button>
             <Button
               variant="secondary"
@@ -113,7 +97,7 @@ export default function AdminDashboard() {
               style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
             >
               {downloadingDefaulters ? <ButtonSpinner /> : <AlertTriangle style={{ width: 14, height: 14, color: "#d97706" }} />}
-              College Defaulters List
+              College Defaulters List (PDF)
             </Button>
             <Button variant="secondary" onClick={load}>
               <RefreshCw style={{ width: 14, height: 14 }} />

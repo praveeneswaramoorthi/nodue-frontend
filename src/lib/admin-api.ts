@@ -1,4 +1,5 @@
 import { apiClient } from "./api";
+import { parseCsvText, generatePdfReport } from "./pdf-export";
 
 // ─── Shared Types ──────────────────────────────────────────────────────────────
 
@@ -335,24 +336,42 @@ export async function getAuditLogs(
   );
 }
 
-// ─── Master Clearance Reports ────────────────────────────────────────────────
+// ─── Master Clearance Reports (PDF Export) ──────────────────────────────────
 
-export async function downloadMasterClearanceSummary(): Promise<Blob> {
+export async function downloadMasterClearancePdf(): Promise<void> {
   const token = typeof window !== "undefined" ? localStorage.getItem("nd_token") : null;
   const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "https://nodue-backend-w83a.onrender.com/api/v1"}/admin/reports/clearance/export`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     credentials: "include",
   });
   if (!res.ok) throw new Error("Failed to download master clearance report");
-  return res.blob();
+  const csvText = await res.text();
+  const { headers, rows } = parseCsvText(csvText);
+  generatePdfReport({
+    filename: "college-master-clearance",
+    title: "College Master Clearance Register",
+    subtitle: "Velalar College of Engineering & Technology · College-wide Clearance Audit",
+    headers,
+    rows,
+    type: "clearance",
+  });
 }
 
-export async function downloadMasterDefaulters(): Promise<Blob> {
+export async function downloadMasterDefaultersPdf(): Promise<void> {
   const token = typeof window !== "undefined" ? localStorage.getItem("nd_token") : null;
   const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "https://nodue-backend-w83a.onrender.com/api/v1"}/admin/reports/defaulters/export`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     credentials: "include",
   });
   if (!res.ok) throw new Error("Failed to download master defaulters list");
-  return res.blob();
+  const csvText = await res.text();
+  const { headers, rows } = parseCsvText(csvText);
+  generatePdfReport({
+    filename: "college-defaulters-list",
+    title: "College Clearance Defaulters List",
+    subtitle: "Velalar College of Engineering & Technology · Pending & Defaulter Audit",
+    headers,
+    rows,
+    type: "defaulters",
+  });
 }
