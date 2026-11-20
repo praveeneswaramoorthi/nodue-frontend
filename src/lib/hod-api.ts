@@ -280,6 +280,7 @@ export interface HodQueueStudent {
     verified: boolean;
     advisorApproved: boolean;
     hodApproved: boolean;
+    cashierApproved?: boolean;
   };
 }
 
@@ -376,6 +377,7 @@ export interface FeeVerificationRow {
   verified: boolean;
   advisorApproved: boolean;
   hodApproved: boolean;
+  cashierApproved?: boolean;
 }
 
 export interface GetFeeVerificationParams {

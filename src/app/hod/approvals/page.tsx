@@ -353,7 +353,8 @@ export default function HodApprovalsPage() {
                   const feeVerified = Boolean(
                     row.student.feeVerification?.verified ||
                     row.student.feeVerification?.advisorApproved ||
-                    row.student.feeVerification?.hodApproved
+                    row.student.feeVerification?.hodApproved ||
+                    row.student.feeVerification?.cashierApproved
                   );
                   return (
                     <tr

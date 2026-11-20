@@ -341,6 +341,7 @@ export interface FeeVerificationRow {
   verified: boolean;
   advisorApproved: boolean;
   hodApproved: boolean;
+  cashierApproved?: boolean;
 }
 
 export interface GetFeeVerificationParams {
@@ -394,6 +395,7 @@ export interface AdvisorQueueStudent {
     verified: boolean;
     advisorApproved: boolean;
     hodApproved: boolean;
+    cashierApproved?: boolean;
   };
 }
 
